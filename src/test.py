@@ -3,7 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 import torch
-import psutil
+import sys
 
 # Step 1: Define the Quantization Configuration
 quantization_config = BitsAndBytesConfig(
@@ -44,30 +44,25 @@ def profile_loading(examples):
     return tokenized_dict
 
 dataset = load_dataset("wikiann", "en", split="train")
+
+# Calculate Dataset Size
+def get_dataset_size(dataset):
+    total_bytes = 0
+    for example in dataset:
+        total_bytes += sys.getsizeof(example)
+    return total_bytes
+
+num_samples = len(dataset)
+dataset_size_bytes = get_dataset_size(dataset)
+print(f"Dataset contains {num_samples} examples.")
+print(f"Estimated dataset size: {dataset_size_bytes / (1024 ** 2):.2f} MB")
+
 dataset = dataset.map(profile_loading, remove_columns=["tokens"])
 
-# Step 4: Create a DataLoader with I/O Profiling in collate_fn
+# Step 4: Create a DataLoader with simplified collate_fn
 def collate_fn(batch):
-    # Start I/O profiling
-    initial_io = psutil.disk_io_counters()
-    start_time = time.time()
-
-    # Process batch
     input_ids = torch.tensor([item["input_ids"] for item in batch])
     attention_mask = torch.tensor([item["attention_mask"] for item in batch])
-
-    # End I/O profiling
-    end_time = time.time()
-    final_io = psutil.disk_io_counters()
-
-    read_bytes = final_io.read_bytes - initial_io.read_bytes
-    write_bytes = final_io.write_bytes - initial_io.write_bytes
-
-    # Log profiling results
-    print(f"Collated batch in {end_time - start_time:.4f} seconds "
-          f"| Read Bytes: {read_bytes} "
-          f"| Write Bytes: {write_bytes}")
-
     return {"input_ids": input_ids, "attention_mask": attention_mask}
 
 data_loader = DataLoader(
@@ -76,7 +71,7 @@ data_loader = DataLoader(
     collate_fn=collate_fn,
 )
 
-# Step 5: Perform Inference with Profiling
+# Step 5: Perform Inference
 device = next(model.parameters()).device
 
 for batch in data_loader:
